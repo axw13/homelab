@@ -1,0 +1,296 @@
+esphome:
+  name: blindsbed
+  friendly_name: BlindsBed
+
+  on_boot:
+    priority: -200
+    then:
+      - delay: 8s
+      - stepper.report_position:
+          id: my_stepper
+          position: !lambda 'return id(saved_pos);'
+      - delay: 200ms
+      - lambda: |-
+          id(boot_ready) = true;
+          ESP_LOGW("restore",
+            "RESTORED: pos=%d open=%d closed=%d open_set=%d closed_set=%d stepper=%d",
+            id(saved_pos), id(open_steps), id(closed_steps),
+            (int)id(open_set), (int)id(closed_set),
+            (int)id(my_stepper).current_position);
+
+esp8266:
+  board: nodemcuv2
+  restore_from_flash: true
+
+logger:
+
+api:
+  encryption:
+    key: !secret api_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  min_auth_mode: WPA2
+  power_save_mode: none         # Prevents WiFi radio light sleep — fixes periodic drops
+  ap:
+    ssid: "Blindsbed Fallback Hotspot"
+    password: !secret ap_password
+
+captive_portal:
+
+preferences:
+  flash_write_interval: 300s    # Reduced flash write frequency (was 60s) — less CPU blocking
+
+substitutions:
+  COVER_INVERT: "false"         # set "true" if HA open/close is reversed
+
+stepper:
+  - platform: uln2003
+    id: my_stepper
+    pin_a: GPIO5
+    pin_b: GPIO4
+    pin_c: GPIO14
+    pin_d: GPIO12
+    max_speed: 150 steps/s
+    acceleration: 300
+    deceleration: 300
+    sleep_when_done: true
+
+globals:
+  - id: boot_ready
+    type: bool
+    restore_value: no
+    initial_value: "false"
+
+  # Last persisted stepper position (survives power loss)
+  - id: saved_pos
+    type: int
+    restore_value: yes
+    initial_value: "0"
+
+  # Calibration endpoints
+  - id: open_steps
+    type: int
+    restore_value: yes
+    initial_value: "0"
+
+  - id: closed_steps
+    type: int
+    restore_value: yes
+    initial_value: "0"
+
+  - id: open_set
+    type: bool
+    restore_value: yes
+    initial_value: "false"
+
+  - id: closed_set
+    type: bool
+    restore_value: yes
+    initial_value: "false"
+
+  # Last published stepper position (detect changes without spamming HA)
+  - id: last_published_pos
+    type: int
+    restore_value: no
+    initial_value: "-999999"
+
+# ─── Helpers ──────────────────────────────────────────────────────────────────
+
+script:
+  # Converts current stepper position to a 0.0–1.0 cover position and publishes
+  - id: publish_cover_position
+    then:
+      - cover.template.publish:
+          id: blinds_cover
+          position: !lambda |-
+            float open_s   = (float)id(open_steps);
+            float closed_s = (float)id(closed_steps);
+            if (open_s == closed_s) return 0.0f;
+            float p = ((float)id(my_stepper).current_position - closed_s) / (open_s - closed_s);
+            p = p < 0.0f ? 0.0f : (p > 1.0f ? 1.0f : p);
+            return ${COVER_INVERT} ? 1.0f - p : p;
+
+# ─── Interval ─────────────────────────────────────────────────────────────────
+
+interval:
+  - interval: 300ms
+    then:
+      - lambda: |-
+          if (!id(boot_ready)) return;
+
+          int cur = (int)id(my_stepper).current_position;
+
+          // Persist position only when it actually changed
+          if (cur != id(saved_pos)) {
+            id(saved_pos) = cur;
+          }
+
+          // Publish cover position only when moving or on first tick after boot
+          bool moving = id(my_stepper).current_position != id(my_stepper).target_position;
+          bool changed = (cur != id(last_published_pos));
+
+          if ((moving || changed) && id(open_set) && id(closed_set)) {
+            id(last_published_pos) = cur;
+            id(publish_cover_position).execute();
+          }
+
+# ─── Sensors ──────────────────────────────────────────────────────────────────
+
+sensor:
+  - platform: template
+    name: "Blinds Step Position"
+    lambda: 'return (float)id(my_stepper).current_position;'
+    update_interval: 2s         # Reduced from 500ms — delta filter prevents unnecessary publishes anyway
+    filters:
+      - delta: 1.0
+
+  - platform: template
+    name: "Blinds Saved Position"
+    lambda: 'return (float)id(saved_pos);'
+    update_interval: 10s        # Reduced from 5s — this value only matters at rest
+    filters:
+      - delta: 1.0
+
+text_sensor:
+  - platform: template
+    name: "Blinds Calibration Status"
+    update_interval: 30s        # Reduced from 10s — calibration status rarely changes
+    lambda: |-
+      if ( id(open_set) &&  id(closed_set)) return {"OK (OPEN+CLOSE set)"};
+      if ( id(open_set) && !id(closed_set)) return {"Only OPEN set"};
+      if (!id(open_set) &&  id(closed_set)) return {"Only CLOSE set"};
+      return {"Not calibrated"};
+
+# ─── Cover ────────────────────────────────────────────────────────────────────
+
+cover:
+  - platform: template
+    name: "Blinds"
+    id: blinds_cover
+    device_class: blind
+    has_position: true
+    optimistic: false
+
+    # Polled fallback; the interval above keeps HA in sync during movement.
+    lambda: |-
+      if (!(id(open_set) && id(closed_set))) return 0.0f;
+      float open_s   = (float)id(open_steps);
+      float closed_s = (float)id(closed_steps);
+      if (open_s == closed_s) return 0.0f;
+      float p = ((float)id(my_stepper).current_position - closed_s) / (open_s - closed_s);
+      p = p < 0.0f ? 0.0f : (p > 1.0f ? 1.0f : p);
+      return ${COVER_INVERT} ? 1.0f - p : p;
+
+    open_action:
+      - if:
+          condition:
+            lambda: 'return id(boot_ready) && id(open_set) && id(closed_set);'
+          then:
+            - stepper.set_target:
+                id: my_stepper
+                target: !lambda |-
+                  return ${COVER_INVERT} ? id(closed_steps) : id(open_steps);
+
+    close_action:
+      - if:
+          condition:
+            lambda: 'return id(boot_ready) && id(open_set) && id(closed_set);'
+          then:
+            - stepper.set_target:
+                id: my_stepper
+                target: !lambda |-
+                  return ${COVER_INVERT} ? id(open_steps) : id(closed_steps);
+
+    stop_action:
+      - lambda: |-
+          int cur = (int)id(my_stepper).current_position;
+          id(my_stepper).set_target(cur);
+          id(saved_pos) = cur;
+
+    position_action:
+      - if:
+          condition:
+            lambda: 'return id(boot_ready) && id(open_set) && id(closed_set);'
+          then:
+            - stepper.set_target:
+                id: my_stepper
+                target: !lambda |-
+                  float open_s   = (float)id(open_steps);
+                  float closed_s = (float)id(closed_steps);
+                  float ui_pos   = ${COVER_INVERT} ? 1.0f - pos : pos;
+                  int tgt = (int)(closed_s + ui_pos * (open_s - closed_s));
+                  float lo = open_s < closed_s ? open_s : closed_s;
+                  float hi = open_s > closed_s ? open_s : closed_s;
+                  if (tgt < (int)lo) tgt = (int)lo;
+                  if (tgt > (int)hi) tgt = (int)hi;
+                  return tgt;
+
+# ─── Calibration Buttons ──────────────────────────────────────────────────────
+
+button:
+  # Press when blinds are physically at the fully OPEN position
+  - platform: template
+    name: "Calibrate: Set Open Position"
+    on_press:
+      - lambda: |-
+          id(open_steps) = (int)id(my_stepper).current_position;
+          id(open_set)   = true;
+          id(saved_pos)  = id(open_steps);
+          ESP_LOGW("calib", "OPEN position set to %d", id(open_steps));
+
+  # Press when blinds are physically at the fully CLOSED position
+  - platform: template
+    name: "Calibrate: Set Closed Position"
+    on_press:
+      - lambda: |-
+          id(closed_steps) = (int)id(my_stepper).current_position;
+          id(closed_set)   = true;
+          id(saved_pos)    = id(closed_steps));
+          ESP_LOGW("calib", "CLOSED position set to %d", id(closed_steps));
+
+  # Wipe calibration — useful when re-mounting or changing direction
+  - platform: template
+    name: "Calibrate: Clear All"
+    on_press:
+      - lambda: |-
+          id(open_set)     = false;
+          id(closed_set)   = false;
+          id(open_steps)   = 0;
+          id(closed_steps) = 0;
+          id(saved_pos)    = 0;
+          id(last_published_pos) = -999999;
+          id(my_stepper).report_position(0);
+          id(my_stepper).set_target(0);
+          ESP_LOGW("calib", "Calibration cleared — stepper reset to 0");
+
+# ─── Manual absolute-position control ─────────────────────────────────────────
+
+number:
+  - platform: template
+    name: "Blinds Manual Move Steps"
+    id: manual_move_steps
+    mode: box
+    min_value: -200000
+    max_value: 200000
+    step: 1
+    optimistic: true
+    restore_value: false
+    initial_value: 0
+    set_action:
+      - lambda: |-
+          int tgt = (int)x;
+          if (id(open_set) && id(closed_set)) {
+            int a = id(open_steps), b = id(closed_steps);
+            int lo = a < b ? a : b;
+            int hi = a > b ? a : b;
+            if (tgt < lo) tgt = lo;
+            if (tgt > hi) tgt = hi;
+          }
+          id(my_stepper).set_target(tgt);
+          id(manual_move_steps).publish_state((float)tgt);
