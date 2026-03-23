@@ -14,6 +14,8 @@
 - [Zigbee Network](#-zigbee-network)
 - [VPN & Remote Access](#-vpn--remote-access)
 - [Monitoring & Security](#-monitoring--security)
+- [Backup Strategy](#-backup-strategy)
+- [Roadmap](#-roadmap)
 - [About Me](#-about-me)
 
 ---
@@ -43,7 +45,7 @@
 | Device | Role |
 |--------|------|
 | **pfSense (VM 106)** | Router, firewall, DHCP, DNS forwarder |
-| Managed switch | Internal switching, VLANs |
+| Managed switch | Internal switching |
 
 ---
 
@@ -57,24 +59,15 @@ Internet
     │
     ├──── [ Managed Switch ] ──── 10GbE / 2.5GbE uplinks
     │           │
-    │     ┌─────┼───────────────────────┐
+    │     ┌─────┴───────────────────────┐
     │     │                             │
     │  [ Proxmox Host ]       [ Workstation ]
     │  Xeon E5-2690 v3          Ryzen 7800X3D
     │  64GB RAM                 RX 7900 XTX
     │  Arc A380 (passthrough)
     │     │
-    │  ┌──┴──────────────────────────────────────────────┐
-    │  │  VMs                                             │
-    │  │  ├─ 100 haos14.0    Home Assistant OS           │
-    │  │  ├─ 102 UbuntuServer  Docker host (Portainer)   │
-    │  │  ├─ 103 truenas      NAS + TrueNAS apps         │
-    │  │  │                   └─ Arc A380 (GPU passthru) │
-    │  │  ├─ 105 serverNET    Pi-hole + USB printer      │
-    │  │  ├─ 106 pfSense      Router / Firewall          │
-    │  │  ├─ 108 wazuh        SIEM / Security            │
-    │  │  └─ 101 Zabbix       LXC — Monitoring           │
-    │  └─────────────────────────────────────────────────┘
+    │     ├── KVM Virtual Machines (see table below)
+    │     └── LXC Containers (Zabbix only)
     │
     └──── [ WireGuard + Tailscale ] ◄── Remote access
 ```
@@ -163,11 +156,11 @@ Internet
 
 ---
 
-### 🏠 Smart Home — Home Assistant OS (VM 100)
+## 🏡 Smart Home
 
-**Platform:** [Home Assistant OS](https://www.home-assistant.io/)
+**Platform:** [Home Assistant OS](https://www.home-assistant.io/) — VM 100 (`haos14.0`)
 
-#### Integrations
+### Integrations
 
 | Integration | Purpose |
 |-------------|---------|
@@ -180,10 +173,10 @@ Internet
 | **Blueair** | Air purifiers (PM2.5 automation) |
 | **iPhone / Android** | Presence detection |
 
-#### Key Automations
+### Key Automations
 
 - 🌬️ **Air purifier control** — PM2.5-triggered fan speed for two Blueair P30 Silk 2.0 units. Stale sensor guard, sleep mode logic, and ionizer/UV re-enable after speed changes.
-- 🏠 **Presence detection** — Multi-source: phone GPS, PC session state (`sensor.gamingpc_sessionstate`), device trackers. Per-room `input_boolean` guards prevent false triggers.
+- 🏠 **Presence detection** — Multi-source: phone GPS, PC session state (`sensor.gamingpc_sessionstate`), and device trackers. Per-room `input_boolean` guards prevent false triggers.
 - 🪟 **Motorized blinds** — ESPHome NodeMCU controlling a bedroom blind motor.
 - 🤖 **Roborock vacuum** — Room-segment cleaning by presence and schedule.
 - 💡 **Plex pause lighting** — LG C1 adjusts automatically when Plex is paused.
@@ -221,7 +214,7 @@ Internet
 |---------|--------------|
 | **WireGuard** | Full-tunnel VPN — pfSense handles port forwarding and firewall rules |
 | **Tailscale** | Zero-config mesh overlay — quick SSH and internal service access |
-| **Cloudflared** | Cloudflare Tunnel on UbuntuServer — selective external exposure via Nginx Proxy Manager |
+| **Cloudflared** | Cloudflare Tunnel — selective external exposure via Nginx Proxy Manager |
 
 ---
 
@@ -236,6 +229,35 @@ Internet
 - SIEM platform for log aggregation and correlation
 - Vulnerability tracking across all hosts
 - Security event alerting
+
+---
+
+## 💾 Backup Strategy
+
+Backups are handled by **Proxmox Backup Server**, with jobs running every **Monday at 01:00**. Backup files are stored on TrueNAS via an NFS share (`backupnas`), with a separate local job for TrueNAS itself.
+
+| Job | VMs Covered | Storage | Retention | Compression |
+|-----|-------------|---------|-----------|-------------|
+| **Main backup** | 100 (haos), 102 (UbuntuServer), 105 (serverNET), 108 (wazuh) | `backupnas` → TrueNAS NFS | keep-last=2 | ZSTD |
+| **TrueNAS backup** | 103 (truenas) | `local` (Proxmox) | keep-last=2 | ZSTD |
+
+**Notes:**
+- All backups use **snapshot mode** — no downtime required
+- pfSense (106) is excluded — configuration is exported separately via pfSense's own backup
+- TrueNAS is backed up to local Proxmox storage to avoid a circular dependency (can't back up the NFS server to itself)
+
+---
+
+## 🗺️ Roadmap
+
+Things I'm planning to build, break, or improve:
+
+- [ ] **VLAN segmentation** — separate IoT, management, and trusted device networks on pfSense
+- [ ] **Offsite backup** — replicate critical VM backups to a cloud target or remote location
+- [ ] **CCNA home lab** — dedicated GNS3 / EVE-NG VM for Cisco switching and routing practice
+- [ ] **Expand Zigbee mesh** — add more Zigbee routers to fix `BedroomSocket` LQI issues
+- [ ] **Automate more with n8n** — connect Home Assistant events to n8n workflows
+- [ ] **Upgrade to PBS dedicated node** — move Proxmox Backup Server to its own machine
 
 ---
 
