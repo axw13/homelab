@@ -265,10 +265,6 @@ Things I'm planning to build, break, or improve:
 
 Network & Telecom Engineer by day, homelabber by night. This repo documents my self-hosted setup — built to learn, experiment, and break things in a controlled way.
 
-- 🔧 **Day job:** Network operations (RAN + fixed broadband infrastructure)
-- 📚 **Currently studying:** Cisco CCNA → CCNP → CCIE switching track
-- 🛠️ **Interests:** Networking, self-hosting, smart home, local AI inference, electronics (SMD soldering, GPU repair)
-
 ---
 
 *Living document — updated as the lab evolves.*
