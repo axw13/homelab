@@ -1,269 +1,177 @@
-# 🏠 AlexM's Homelab
+# 🏠 Homelab — Infrastructure as Code, Zero-Trust Network, Self-Hosted Everything
 
-> Self-hosted infrastructure built and maintained as a personal learning platform alongside a career in network & telecom engineering.
+> A production-style homelab built to practice and demonstrate real infrastructure engineering: Infrastructure as Code, centralized secrets management, single sign-on, network segmentation, SIEM/security monitoring, and tested disaster recovery — not just "a pile of Docker containers."
+
+The Terraform/Ansible source for this lab is kept in a private repository (it contains real network topology and is not for public sharing) — this README documents the architecture, design decisions, and the engineering practices behind it.
 
 ---
 
 ## 📋 Table of Contents
 
-- [Hardware](#-hardware)
-- [Network Topology](#-network-topology)
-- [Virtualisation Stack](#-virtualisation-stack)
-- [Services](#-services)
+- [Philosophy](#-philosophy)
+- [Architecture Overview](#-architecture-overview)
+- [Infrastructure as Code](#-infrastructure-as-code)
+- [Secrets Management](#-secrets-management)
+- [Single Sign-On](#-single-sign-on)
+- [Network Segmentation](#-network-segmentation)
+- [Internal PKI & Reverse Proxy](#-internal-pki--reverse-proxy)
+- [Monitoring, Logging & SIEM](#-monitoring-logging--siem)
+- [Backup & Disaster Recovery](#-backup--disaster-recovery)
+- [Services Catalog](#-services-catalog)
 - [Smart Home](#-smart-home)
-- [Zigbee Network](#-zigbee-network)
-- [VPN & Remote Access](#-vpn--remote-access)
-- [Monitoring & Security](#-monitoring--security)
-- [Backup Strategy](#-backup-strategy)
+- [Engineering Highlights / War Stories](#-engineering-highlights--war-stories)
 - [Roadmap](#-roadmap)
 - [About Me](#-about-me)
 
 ---
 
-## 🖥️ Hardware
+## 🎯 Philosophy
 
-### Workstation / Daily Driver
-| Component | Spec |
-|-----------|------|
-| **CPU** | AMD Ryzen 7 7800X3D |
-| **GPU** | AMD Radeon RX 7900 XTX (24GB VRAM) |
-| **Cooling** | NZXT Kraken AIO |
-| **OS** | Ubuntu 24.04 LTS |
-| **Use** | Daily driver, gaming, local AI (Ollama) |
+Every service here is deployed the same, repeatable way — nothing is hand-clicked into existence. The goals driving every design decision:
 
-### Proxmox Server
-| Component | Spec |
-|-----------|------|
-| **CPU** | Intel Xeon E5-2690 v3 @ 2.60GHz (24 cores) |
-| **RAM** | 64 GB |
-| **GPU** | Intel Arc A380 6GB — passed through to TrueNAS for Jellyfin HW transcoding |
-| **NIC** | 2× 10GbE + 1× 2.5GbE |
-| **Hypervisor** | Proxmox VE 8.4 |
-| **Storage** | Local ZFS + TrueNAS SCALE VM (ZFS pool) |
-
-### Network
-| Device | Role |
-|--------|------|
-| **pfSense (VM 106)** | Router, firewall, DHCP, DNS forwarder |
-| Managed switch | Internal switching |
+- **Everything is code.** New services get a Terraform LXC definition + an Ansible role, not a manual container spin-up.
+- **Nothing is a shared secret sitting in a config file.** Every credential is generated on first deploy and lives in a central secrets manager, never hardcoded, never committed.
+- **One identity, everywhere.** A single SSO login federates into every service that supports it, instead of a different password per app.
+- **The network enforces the trust model, not just the apps.** VLANs + firewall rules mean a compromised IoT device physically cannot reach the secrets manager, even if every app-level auth check somehow failed.
+- **If it can't be restored from nothing, it's not actually backed up.** The disaster recovery procedure has been written and dry-run tested end-to-end, not just assumed to work.
 
 ---
 
-## 🗺️ Network Topology
+## 🗺️ Architecture Overview
 
 ```
 Internet
-    │
-    ▼
-[ pfSense (VM 106) — Router / Firewall ]
-    │
-    ├──── [ Managed Switch ] ──── 10GbE / 2.5GbE uplinks
-    │           │
-    │     ┌─────┴───────────────────────┐
-    │     │                             │
-    │  [ Proxmox Host ]       [ Workstation ]
-    │  Xeon E5-2690 v3          Ryzen 7800X3D
-    │  64GB RAM                 RX 7900 XTX
-    │  Arc A380 (passthrough)
-    │     │
-    │     ├── KVM Virtual Machines (see table below)
-    │     └── LXC Containers (Zabbix only)
-    │
-    └──── [ WireGuard + Tailscale ] ◄── Remote access
+   │
+   ▼
+[ Firewall / Router — VLAN-aware, stateful rules per segment ]
+   │
+   ├── Management VLAN     — bastion host, IaC tooling, admin access only
+   ├── Infrastructure VLAN — reverse proxy, DNS, internal CA, CI/CD, databases
+   ├── Application VLAN    — automation, dashboards, home inventory, smart home
+   ├── Media VLAN          — media server + media automation stack
+   ├── Security VLAN       — secrets manager, SSO, SIEM (most tightly firewalled segment)
+   ├── Clients VLAN        — personal devices, workstations, IoT (until its own VLAN is finished)
+   ├── VPN VLAN            — dedicated WireGuard gateway for remote access
+   └── DMZ VLAN            — the one thing exposed toward the internet (tunnel endpoint)
+
+Cross-VLAN traffic is default-deny; every exception is an explicit, documented pass rule.
 ```
 
----
+**Hypervisor:** Proxmox VE, single physical host, LXC-first (containers for every Linux service; a couple of true VMs only where required — router/firewall, smart-home OS, NAS).
 
-## 🧱 Virtualisation Stack
-
-**Hypervisor:** [Proxmox VE](https://www.proxmox.com/) 8.4
-
-| VM ID | Name | Type | Role |
-|-------|------|------|------|
-| 100 | `haos14.0` | KVM VM | Home Assistant OS |
-| 102 | `UbuntuServer` | KVM VM | Docker host — all Portainer containers |
-| 103 | `truenas` | KVM VM | NAS + ZFS + TrueNAS app platform |
-| 105 | `serverNET` | KVM VM | Pi-hole DNS + USB printer passthrough |
-| 106 | `pfSense` | KVM VM | Router / firewall |
-| 108 | `wazuh` | KVM VM | SIEM / security |
-| 101 | `Zabbix` | **LXC** | Monitoring (only LXC on the host) |
+**Storage:** A dedicated NAS VM running ZFS in RAIDZ2, serving both media storage and NFS-backed storage for some containers' root disks.
 
 ---
 
-## 🛠️ Services
+## 🧱 Infrastructure as Code
 
-### 🎬 Media Stack — TrueNAS SCALE (VM 103)
-
-> Intel Arc A380 passed through to TrueNAS for hardware-accelerated Jellyfin transcoding.
-
-| App | Purpose |
-|-----|---------|
-| **Jellyfin** | Primary media server — hardware transcoding via Arc A380 |
-| **Plex** | Secondary media server |
-| **Overseerr** | Media request management |
-| **Sonarr** | TV show automation |
-| **Radarr** | Movie automation |
-| **Lidarr** | Music automation |
-| **Bazarr** | Subtitle automation |
-| **Prowlarr** | Indexer aggregator for *arr stack |
-| **qBittorrent** | Download client |
-| **Kavita** | E-book / manga library server |
-
-### 🤖 AI Stack — TrueNAS SCALE (VM 103)
-
-| App | Purpose |
-|-----|---------|
-| **Ollama** | Local LLM inference engine |
-| **Open WebUI** | Chat UI frontend for Ollama |
-
-### 🛠️ Infrastructure — TrueNAS SCALE (VM 103)
-
-| App | Purpose |
-|-----|---------|
-| **Collabora** | Online document editing (Nextcloud Office) |
-| **Nextcloud** | Self-hosted cloud storage & file sync |
-| **MariaDB** | Database backend |
-| **Netbootxyz** | Network boot / PXE server |
-| **Lingarr** | Subtitle translation |
-| **Qui** | Queue management UI |
+- **Terraform** (`bpg/proxmox` provider) drives every LXC's existence — a single JSON file defines each container's VLAN, IP, resources, and storage backend; a `for_each` loop turns that into real infrastructure. Adding a new service is: add one JSON entry, write one Ansible role, `terraform apply`.
+- **Terraform state** is stored in Postgres (not local files), so infrastructure changes are safe even with the tooling itself running from a container that could be rebuilt.
+- **Ansible** owns everything past "the container exists" — package installs, service config, reverse-proxy site blocks, DNS records, and the secrets-generation dance described below. Roles follow a strict idempotent pattern: check if a secret exists first, generate only if missing, never regenerate and break an existing integration.
 
 ---
 
-### 🐳 Docker Containers — UbuntuServer (VM 102) via Portainer
+## 🔑 Secrets Management
 
-#### 💰 Finance & Productivity
-| Container | Purpose |
-|-----------|---------|
-| **Actual Budget** | Local-first personal finance / budgeting |
-| **Homebox** | Home inventory management |
-| **Gramps Web** | Genealogy / family tree |
+**HashiCorp Vault** is the single source of truth for every credential in the lab. The pattern used everywhere:
 
-#### 🤖 AI & Automation
-| Container | Purpose |
-|-----------|---------|
-| **n8n** | Workflow automation (self-hosted Zapier alternative) |
-| **Self-hosted AI Starter Kit** | AI pipeline stack (n8n + Qdrant + Postgres) |
-| **Qdrant** | Vector database for AI/RAG workloads |
-| **SearXNG** | Privacy-respecting metasearch engine |
+1. Ansible checks Vault for an existing secret at a known path.
+2. If found, reuse it (idempotent — re-running a playbook never rotates a working credential out from under a live integration).
+3. If not found, generate a fresh random one, write it to Vault, and use it.
 
-#### 🌐 Network & Proxy
-| Container | Purpose |
-|-----------|---------|
-| **Nginx Proxy Manager** | Reverse proxy + SSL termination |
-| **Cloudflared** | Cloudflare Tunnel — secure external access |
-| **nl-outage** | Netherlands outage monitoring / alerting |
-| **Portainer** | Docker container management UI |
+This means: no password is ever typed into a YAML file, no API key lives in `docker-compose.yml`, and a full credential audit is one `vault kv list` away.
+
+Vault itself is backed up via its integrated Raft snapshot mechanism — restoring it correctly (and understanding *why* the original unseal keys, not new ones, are required after a restore) is documented as its own disaster-recovery runbook.
+
+---
+
+## 🔐 Single Sign-On
+
+**Authentik** provides OIDC-based SSO across the services that support it (git hosting, dashboards, monitoring, wiki, secrets manager UI, IPAM, and more). Getting this working consistently across a dozen different apps' OIDC implementations surfaced a lot of real integration quirks — mismatched scope requests, apps that silently drop non-explicit `grant_types`, GraphQL mutations that delete-and-recreate config instead of patching it — all captured as reusable Ansible task patterns rather than one-off hacks.
+
+---
+
+## 🌐 Network Segmentation
+
+Nine purpose-built VLANs (management, infrastructure, applications, media, security, clients, IoT, VPN, DMZ), enforced by explicit firewall rules rather than a flat "trusted LAN." Default posture is deny-by-default between segments, with narrow, documented exceptions (e.g., the monitoring segment is allowed to scrape metrics from other segments on exactly the ports it needs, nothing else).
+
+Key design decisions:
+- The secrets manager and SSO provider live on the most restricted segment — reachable by almost nothing except what explicitly needs them.
+- A dedicated VPN gateway (WireGuard) provides remote access without exposing anything else directly to the internet.
+- The one thing that *is* internet-facing (a tunnel endpoint for selective external access) sits alone in its own DMZ segment.
+
+---
+
+## 🔏 Internal PKI & Reverse Proxy
+
+A private internal CA (step-ca) issues real, trusted TLS certificates to every internal service via ACME — every internal hostname gets automatic HTTPS with no self-signed-cert browser warnings, because every host in the fleet trusts the internal root CA. **Caddy** handles reverse proxying and automatic cert renewal for the whole service catalog from one place.
+
+---
+
+## 📊 Monitoring, Logging & SIEM
+
+- **Prometheus + Grafana** — full-fleet metrics, including the hypervisor itself, with a single "fleet overview" dashboard and per-host drill-down.
+- **Loki** — centralized log aggregation.
+- **Wazuh** — SIEM/XDR with an agent on every single host in the fleet (management host included), giving full security-event visibility and vulnerability tracking across the whole environment, not just the "important" servers.
+
+---
+
+## 💾 Backup & Disaster Recovery
+
+The backup strategy deliberately does **not** back up everything — infrastructure that Terraform/Ansible can faithfully recreate isn't backed up at all; only genuine, non-recreatable *data* is (secrets manager contents, internal CA keys, application databases, git repositories, workflow/automation state, smart-home configuration).
+
+- **restic**, encrypting client-side before anything leaves the network, deduplicating across runs, with a daily/weekly/monthly retention policy.
+- A second, independent encryption layer (age) on top of the single highest-value bundle (secrets manager + CA keys) — so a compromised backup-tool password alone still isn't enough to read the most sensitive material.
+- Offsite target, reached via `rclone`, kept separate from on-site NAS backups.
+- A **fully written, dry-run-tested disaster recovery runbook** — not just "we have backups," but a step-by-step procedure that assumes the reader has zero prior context, was actually exercised (including catching and documenting a couple of genuine gotchas around stale locks and orphaned backup data along the way).
+
+---
+
+## 🛠️ Services Catalog
+
+| Category | Services |
+|---|---|
+| **Identity & Secrets** | Vault, Authentik |
+| **Networking** | Internal CA (step-ca), reverse proxy (Caddy), DNS/ad-blocking (Pi-hole), WireGuard VPN |
+| **CI/CD & Source Control** | Self-hosted Git, CI server |
+| **Observability** | Prometheus, Grafana, Loki, Wazuh SIEM |
+| **IPAM/DCIM** | NetBox |
+| **Documentation** | Self-hosted wiki |
+| **Media** | Media server (hardware-accelerated transcoding), automated media management/acquisition stack, subtitle automation with multi-provider + multi-language support |
+| **Home Automation** | Home Assistant, WLED, ESPHome, Zigbee2MQTT, various local + cloud device integrations |
+| **Productivity** | Workflow automation, home inventory tracker, unified service dashboard, recipe manager |
 
 ---
 
 ## 🏡 Smart Home
 
-**Platform:** [Home Assistant OS](https://www.home-assistant.io/) — VM 100 (`haos14.0`)
-
-### Integrations
-
-| Integration | Purpose |
-|-------------|---------|
-| **Zigbee2MQTT** | Zigbee device bridge |
-| **LocalTuya** | Tuya Wi-Fi devices — fully local, no cloud |
-| **ESPHome** | Custom ESP-based devices |
-| **WLED** | LED strip controllers |
-| **LG ThinQ** | LG C1 OLED TV |
-| **Roborock** | Robot vacuum |
-| **Blueair** | Air purifiers (PM2.5 automation) |
-| **iPhone / Android** | Presence detection |
-
-### Key Automations
-
-- 🌬️ **Air purifier control** — PM2.5-triggered fan speed for two Blueair P30 Silk 2.0 units. Stale sensor guard, sleep mode logic, and ionizer/UV re-enable after speed changes.
-- 🏠 **Presence detection** — Multi-source: phone GPS, PC session state (`sensor.gamingpc_sessionstate`), and device trackers. Per-room `input_boolean` guards prevent false triggers.
-- 🪟 **Motorized blinds** — ESPHome NodeMCU controlling a bedroom blind motor.
-- 🤖 **Roborock vacuum** — Room-segment cleaning by presence and schedule.
-- 💡 **Plex pause lighting** — LG C1 adjusts automatically when Plex is paused.
-- 📷 **Camera & plug** — Tapo camera and plug toggle on phone presence.
+Home Assistant integrates a mix of local-only (ESPHome, Zigbee2MQTT, WLED) and cloud-dependent (a couple of manufacturer ecosystems that don't offer a local API) devices. Automations include presence-based lighting, TV-power-synced ambient lighting, air-quality-triggered purifier control, and a DIY ESPHome-based motorized blind controller with full position calibration and power-loss recovery (see `esphome/blinds-bedroom` in this repo).
 
 ---
 
-## 📡 Zigbee Network
+## 💡 Engineering Highlights / War Stories
 
-**Coordinator:** Sonoff ZBDongle-E (EFR32MG21 — EZSP firmware)
-**Bridge:** Zigbee2MQTT
+A few real incidents this lab has actually hit and resolved — the parts that don't show up in a features list but are the actual substance of running real infrastructure:
 
-> USB autosuspend disabled via `/etc/modprobe.d/` to prevent known EZSP coordinator freezes under Linux.
-
-| Friendly Name | Type | Location |
-|---------------|------|----------|
-| `LvSocket` | Smart plug | Living room |
-| `AudioSystem` | Smart plug | Audio rack |
-| `BedroomSocket` | Smart plug | Bedroom |
-| `LvSensor` | Temp/humidity sensor | Living room |
-| `KitchenSocket` | Smart plug | Kitchen |
-| `KitchenSensor` | Temp/humidity sensor | Kitchen |
-| `BathroomSensor` | Temp/humidity sensor | Bathroom |
-| `GamingDesk` | Smart plug | Gaming desk |
-| `3Dprinter` | Smart plug | 3D printer |
-| `NetworkSocket` | Smart plug | Network rack |
-
-> ⚠️ `BedroomSocket` shows persistently low LQI — suspected 2.4GHz interference.
-
----
-
-## 🔐 VPN & Remote Access
-
-| Service | How it's used |
-|---------|--------------|
-| **WireGuard** | Full-tunnel VPN — pfSense handles port forwarding and firewall rules |
-| **Tailscale** | Zero-config mesh overlay — quick SSH and internal service access |
-| **Cloudflared** | Cloudflare Tunnel — selective external exposure via Nginx Proxy Manager |
-
----
-
-## 📊 Monitoring & Security
-
-### Zabbix — VM 101 (LXC)
-- Monitors all VMs and the Proxmox host
-- Tracks CPU, RAM, disk I/O, and network throughput
-- Alerting for service downtime and threshold breaches
-
-### Wazuh — VM 108
-- SIEM platform for log aggregation and correlation
-- Vulnerability tracking across all hosts
-- Security event alerting
-
----
-
-## 💾 Backup Strategy
-
-Backups are handled by **Proxmox Backup Server**, with jobs running every **Monday at 01:00**. Backup files are stored on TrueNAS via an NFS share (`backupnas`), with a separate local job for TrueNAS itself.
-
-| Job | VMs Covered | Storage | Retention | Compression |
-|-----|-------------|---------|-----------|-------------|
-| **Main backup** | 100 (haos), 102 (UbuntuServer), 105 (serverNET), 108 (wazuh) | `backupnas` → TrueNAS NFS | keep-last=2 | ZSTD |
-| **TrueNAS backup** | 103 (truenas) | `local` (Proxmox) | keep-last=2 | ZSTD |
-
-**Notes:**
-- All backups use **snapshot mode** — no downtime required
-- pfSense (106) is excluded — configuration is exported separately via pfSense's own backup
-- TrueNAS is backed up to local Proxmox storage to avoid a circular dependency (can't back up the NFS server to itself)
+- **Diagnosed a NAS pool going into a suspended state** during a live incident, correctly distinguishing a genuine failing-drive problem from an HBA/cable-level fault by cross-referencing kernel SAS-port-flap logs against the pool's own fault reporting — rather than guessing and replacing hardware blindly.
+- **Recovered from a real management-network outage** caused by a switch VLAN reassignment mid-migration, diagnosed methodically (bond state → physical link state → full ARP-table cross-reference across every VLAN) rather than assuming and reflashing/rebooting things.
+- **Root-caused a cascading "everything is offline" incident** after a power outage down to a single root cause (most local-network integrations store a static IP and never notice a DHCP lease changed) that had silently broken a dozen unrelated integrations at once, then fixed the actual cause once instead of patching each symptom individually.
+- **Wrote and dry-run tested a full disaster recovery procedure**, catching real gotchas (a stale process lock, orphaned backup data left by an interrupted run) that only show up when you actually try the restore instead of trusting the backup exists.
 
 ---
 
 ## 🗺️ Roadmap
 
-Things I'm planning to build, break, or improve:
-
-- [ ] **VLAN segmentation** — separate IoT, management, and trusted device networks on pfSense
-- [ ] **Offsite backup** — replicate critical VM backups to a cloud target or remote location
-- [ ] **CCNA home lab** — dedicated GNS3 / EVE-NG VM for Cisco switching and routing practice
-- [ ] **Expand Zigbee mesh** — add more Zigbee routers to fix `BedroomSocket` LQI issues
-- [ ] **Automate more with n8n** — connect Home Assistant events to n8n workflows
-- [ ] **Upgrade to PBS dedicated node** — move Proxmox Backup Server to its own machine
+- [ ] Finish dedicated IoT VLAN (currently IoT devices share the general clients segment as an interim measure)
+- [ ] Second offsite backup destination for extra redundancy
+- [ ] Expand SSO coverage to the last few services still using local auth
+- [ ] Formal quarterly disaster-recovery re-test
 
 ---
 
 ## 👾 About Me
 
-Network & Telecom Engineer by day, homelabber by night. This repo documents my self-hosted setup — built to learn, experiment, and break things in a controlled way.
+Network & Telecom Engineer by day, homelabber by night. This lab exists to practice the same engineering discipline in a home environment that I'd want to see in a production one — infrastructure as code, least-privilege network design, centralized secrets, and backups that are actually tested, not just assumed to work.
 
 ---
 
