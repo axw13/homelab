@@ -6,6 +6,18 @@ The Terraform/Ansible source for this lab is kept in a private repository (it co
 
 ---
 
+## 🧰 Skills & Technologies
+
+**IaC / Automation:** Terraform · Ansible · Git · CI/CD
+**Virtualization:** Proxmox VE · LXC · KVM/VM management
+**Networking:** VLAN segmentation · Firewall/ACL design · VPN (WireGuard) · DNS · Internal PKI/ACME
+**Security:** Secrets management (Vault) · SSO/OIDC · SIEM/XDR (Wazuh) · Zero-trust network design
+**Observability:** Prometheus · Grafana · Loki · Alerting design · Hardware health monitoring
+**Systems:** Linux administration · Time sync/NTP · DHCP/IPAM · Reverse proxying
+**Other:** Backup/disaster-recovery engineering · Home automation (Home Assistant, ESPHome) · AI-assisted operations
+
+---
+
 ## 📋 Table of Contents
 
 - [Philosophy](#-philosophy)
