@@ -16,6 +16,7 @@ The Terraform/Ansible source for this lab is kept in a private repository (it co
 - [Network Segmentation](#-network-segmentation)
 - [Internal PKI & Reverse Proxy](#-internal-pki--reverse-proxy)
 - [Monitoring, Logging & SIEM](#-monitoring-logging--siem)
+- [AI-Assisted Fleet Maintenance](#-ai-assisted-fleet-maintenance)
 - [Backup & Disaster Recovery](#-backup--disaster-recovery)
 - [Services Catalog](#-services-catalog)
 - [Smart Home](#-smart-home)
@@ -113,6 +114,19 @@ A private internal CA (step-ca) issues real, trusted TLS certificates to every i
 - **Prometheus + Grafana** — full-fleet metrics, including the hypervisor itself, with a single "fleet overview" dashboard and per-host drill-down.
 - **Loki** — centralized log aggregation.
 - **Wazuh** — SIEM/XDR with an agent on every single host in the fleet (management host included), giving full security-event visibility and vulnerability tracking across the whole environment, not just the "important" servers.
+- **Hardware health, not just service health** — SMART data from the hypervisor's physical disks and pool/array health from the NAS (which has no shell access at all — pulled via its management API instead) both feed the same Grafana instance, with multi-stage alert rules (raw metric → reduced value → threshold) so a slowly-degrading disk pages someone the same way a crashed container would.
+
+---
+
+## 🤖 AI-Assisted Fleet Maintenance
+
+Two headless AI agents run on a schedule against the live monitoring stack (metrics, logs, uptime checks, SIEM) with real but tightly bounded authority — no human approves each individual action, but a strict tiered policy defines exactly what "safely fixable" means:
+
+- **Auto-fixable** (restart a crashed service, clear known-safe disk space) — just done, verified, logged.
+- **Reversible-with-care** (a config change) — snapshot first, apply, verify, roll back automatically if verification fails.
+- **Detect-only, never act** — an explicit, non-negotiable list (the secrets manager, any firewall change, storage-pool mutations, anything destructive) that always gets reported to a human instead of touched.
+
+A fast, narrow daytime pass (metrics/uptime/SIEM/smart-home device health only) runs a couple of times a day; a deeper nightly pass has the full toolset and a longer window. Both report a single, clear summary over chat when done — not a wall of green checkmarks, and never silent about something still unresolved from a prior run.
 
 ---
 
@@ -157,6 +171,7 @@ A few real incidents this lab has actually hit and resolved — the parts that d
 - **Recovered from a real management-network outage** caused by a switch VLAN reassignment mid-migration, diagnosed methodically (bond state → physical link state → full ARP-table cross-reference across every VLAN) rather than assuming and reflashing/rebooting things.
 - **Root-caused a cascading "everything is offline" incident** after a power outage down to a single root cause (most local-network integrations store a static IP and never notice a DHCP lease changed) that had silently broken a dozen unrelated integrations at once, then fixed the actual cause once instead of patching each symptom individually.
 - **Wrote and dry-run tested a full disaster recovery procedure**, catching real gotchas (a stale process lock, orphaned backup data left by an interrupted run) that only show up when you actually try the restore instead of trusting the backup exists.
+- **Chased a "fleet-wide NTP config" change that silently did nothing** — every container reported the change applied successfully, but nothing was actually happening under the hood. Root cause: unprivileged Linux containers share their host's kernel clock and cannot run their own time-sync client at all (the service refuses to even start in a container, and the container has no permission to adjust a clock regardless). The actual fix was pointing the *hypervisor's* own clock at the new internal time server — every container inherits it for free. A good reminder that "the task reported success" and "the task did something real" are two different claims, especially for anything kernel-level.
 
 ---
 
