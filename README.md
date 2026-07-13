@@ -132,13 +132,13 @@ A private internal CA (step-ca) issues real, trusted TLS certificates to every i
 
 ## 🤖 AI-Assisted Fleet Maintenance
 
-Two headless AI agents run on a schedule against the live monitoring stack (metrics, logs, uptime checks, SIEM) with real but tightly bounded authority — no human approves each individual action, but a strict tiered policy defines exactly what "safely fixable" means:
+Three headless AI agents run on a schedule against the live monitoring stack (metrics, logs, uptime checks, SIEM) with real but tightly bounded authority — no human approves each individual action, but a strict tiered policy defines exactly what "safely fixable" means:
 
 - **Auto-fixable** (restart a crashed service, clear known-safe disk space) — just done, verified, logged.
 - **Reversible-with-care** (a config change) — snapshot first, apply, verify, roll back automatically if verification fails.
 - **Detect-only, never act** — an explicit, non-negotiable list (the secrets manager, any firewall change, storage-pool mutations, anything destructive) that always gets reported to a human instead of touched.
 
-A fast, narrow daytime pass (metrics/uptime/SIEM/smart-home device health only) runs a couple of times a day; a deeper nightly pass has the full toolset and a longer window. Both report a single, clear summary over chat when done — not a wall of green checkmarks, and never silent about something still unresolved from a prior run.
+A fast, narrow daytime pass (metrics/uptime/SIEM/smart-home device health only) runs a couple of times a day; a deeper nightly pass has the full toolset and a longer window. A third agent handles patching on its own dedicated nights — it refuses to touch anything until it's confirmed the fleet is actually healthy first, applies a capped, prioritized batch rather than everything at once, and queues the rest for its next scheduled run instead of rushing. The two "check fleet health" agents and the "apply updates" agent are mutually exclusive by design — patch nights are handled deterministically, not by racing for a lock, so it's always predictable which one runs when. All of them report a single, clear summary over chat when done — not a wall of green checkmarks, and never silent about something still unresolved from a prior run.
 
 ---
 
@@ -184,6 +184,7 @@ A few real incidents this lab has actually hit and resolved — the parts that d
 - **Root-caused a cascading "everything is offline" incident** after a power outage down to a single root cause (most local-network integrations store a static IP and never notice a DHCP lease changed) that had silently broken a dozen unrelated integrations at once, then fixed the actual cause once instead of patching each symptom individually.
 - **Wrote and dry-run tested a full disaster recovery procedure**, catching real gotchas (a stale process lock, orphaned backup data left by an interrupted run) that only show up when you actually try the restore instead of trusting the backup exists.
 - **Chased a "fleet-wide NTP config" change that silently did nothing** — every container reported the change applied successfully, but nothing was actually happening under the hood. Root cause: unprivileged Linux containers share their host's kernel clock and cannot run their own time-sync client at all (the service refuses to even start in a container, and the container has no permission to adjust a clock regardless). The actual fix was pointing the *hypervisor's* own clock at the new internal time server — every container inherits it for free. A good reminder that "the task reported success" and "the task did something real" are two different claims, especially for anything kernel-level.
+- **Designed the automated patching workflow to respect IaC as the actual source of truth**, not just the running fleet. Most services here don't pin a specific version in their Ansible config, so patching them live and re-running the role later produces the same result either way — no drift. But a few do pin an exact version tag; patching *those* live without also updating the pinned value in code (and committing it) would create silent infrastructure drift — a future rebuild would quietly redeploy the old version, undoing the patch. The automation checks which case applies before deciding how to apply an update, rather than treating "patch everything the same way" as good enough.
 
 ---
 
