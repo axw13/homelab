@@ -65,7 +65,7 @@ Internet
    ├── Security VLAN       — secrets manager, SSO, SIEM (most tightly firewalled segment)
    ├── Clients VLAN        — personal devices, workstations
    ├── IoT VLAN            — smart home devices, isolated from every other segment except a narrow DNS exception
-   ├── VPN VLAN            — dedicated WireGuard gateway for remote access
+   ├── VPN VLAN            — WireGuard gateway + Tailscale subnet router for remote access
    └── DMZ VLAN            — the one thing exposed toward the internet (tunnel endpoint)
 
 Cross-VLAN traffic is default-deny; every exception is an explicit, documented pass rule.
@@ -114,7 +114,7 @@ Nine purpose-built VLANs (management, infrastructure, applications, media, secur
 
 Key design decisions:
 - The secrets manager and SSO provider live on the most restricted segment — reachable by almost nothing except what explicitly needs them.
-- A dedicated VPN gateway (WireGuard) provides remote access without exposing anything else directly to the internet.
+- A dedicated VPN gateway (WireGuard) provides remote access without exposing anything else directly to the internet, alongside a second, independent VPN path (a Tailscale subnet router) for reaching the management/infrastructure segments both remotely and from a local workstation that's normally firewalled away from them.
 - The one thing that *is* internet-facing (a tunnel endpoint for selective external access) sits alone in its own DMZ segment.
 
 ---
@@ -196,6 +196,7 @@ A few real incidents this lab has actually hit and resolved — the parts that d
 - **Migrated the entire smart-home device fleet onto its own dedicated IoT VLAN**, off the general clients segment — a dozen-plus devices across five different local/cloud protocols (WLED, ESPHome, local Tuya, cloud Tuya, a manufacturer camera app), each with a different migration path. The trickiest recurring gotcha: several local-protocol devices issued a **new authentication key** from the vendor's cloud the moment they rejoined the new network — the same physical device, same account, same everything, but the previously-stored local credential silently stopped authenticating anyway. Traced one particularly stubborn case (a locked-down cloud account with no in-app way to view the device's key) through a chain of dead ends — a developer cloud API blocked by an unexplained subscription-entitlement error on two separately created projects, a MITM-based extraction approach blocked by the same network segmentation this migration was implementing — before finding that the vendor's own web console had a session-authenticated API explorer that bypassed the entitlement gate entirely, since it doesn't rely on the same developer-credential path.
 - **Chased an intermittent "invalid auth" on a freshly-migrated camera integration** that turned out to have nothing to do with credentials at all — a device-level "third-party API compatibility" toggle had been silently reset to off during the same network rejoin, a separate setting from the account/device password entirely. A reminder that "authentication failed" doesn't always mean the credentials are wrong.
 - **Stood up a WireGuard remote-access peer and hit a networking gap that had never been exercised**: the gateway's outbound NAT rule for tunnel-peer traffic didn't exist at all — traffic left the tunnel fine, but the router had no route back to an individual peer's tunnel address (only the gateway host's own address was a known route on that segment), so every reply silently vanished, DNS included. Root-caused with a live packet capture on the gateway's own interface during a real connection attempt, which conclusively separated "traffic never arrives" (a port-forward/NAT problem upstream) from "traffic arrives but routes nowhere" (this bug) — two failure modes that look identical from the client side but need completely different fixes.
+- **Added a second, independent VPN path (a subnet router) for reaching the management/infrastructure segments**, both remotely and from a local workstation that's normally firewalled away from them — deliberately alongside the existing gateway rather than replacing it. Assumed it would need the identical manual NAT fix as the WireGuard case above and checked before adding it: this tool manages its own return-routing automatically the moment subnet routing is enabled, no manual rule required — a good reminder that two conceptually similar VPN tools can differ completely in what they handle for you versus what you have to do by hand, and that's worth verifying rather than assuming from precedent. Confirmed the whole thing actually worked with a real differential test rather than a superficial one: an unrelated segment already had a broad "allow everything else" rule that made a naive reachability test pass regardless of whether the VPN was even connected, so the real proof came from testing against a *different* segment with an explicit, narrow block rule instead — same request, failed with the VPN off, succeeded immediately with it on.
 
 ---
 
