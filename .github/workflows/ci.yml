@@ -1,0 +1,80 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  esphome:
+    name: ESPHome compile
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Cache PlatformIO toolchains
+        uses: actions/cache@v4
+        with:
+          path: ~/.platformio
+          key: platformio-${{ runner.os }}-${{ hashFiles('esphome/**/*.yaml') }}
+          restore-keys: platformio-${{ runner.os }}-
+      - run: pip install esphome
+      - name: Compile every device config with dummy secrets
+        run: |
+          for cfg in esphome/*/*.yaml; do
+            dir=$(dirname "$cfg")
+            cat > "$dir/secrets.yaml" <<'SECRETS'
+          wifi_ssid: "ci-ssid"
+          wifi_password: "ci-password"
+          api_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          ota_password: "ci-ota-password"
+          ap_password: "ci-ap-password"
+          SECRETS
+            echo "::group::$cfg"
+            esphome compile "$cfg"
+            echo "::endgroup::"
+          done
+
+  terraform:
+    name: Terraform fmt + validate
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/terraform
+    steps:
+      - uses: actions/checkout@v4
+      - uses: hashicorp/setup-terraform@v3
+      - run: terraform fmt -check -recursive -diff
+      - run: terraform init -backend=false -input=false
+      - run: terraform validate
+
+  ansible:
+    name: Ansible syntax check
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: examples/ansible
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install ansible-core
+      - run: ansible-galaxy collection install -r requirements.yml
+      - run: ansible-playbook --syntax-check site.yml
+
+  lint:
+    name: YAML lint + Markdown links
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: pipx run yamllint --strict .
+      - name: Check Markdown links (repo-internal only)
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --offline --no-progress '**/*.md'
+          fail: true
