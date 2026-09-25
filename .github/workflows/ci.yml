@@ -30,7 +30,7 @@ jobs:
             cat > "$dir/secrets.yaml" <<'SECRETS'
           wifi_ssid: "ci-ssid"
           wifi_password: "ci-password"
-          api_key: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA="
+          api_key: "Y2ktZHVtbXkta2V5LW5vdC1hLXJlYWwtc2VjcmV0ISE="  # dummy, not all-zeros (ESPHome rejects that)
           ota_password: "ci-ota-password"
           ap_password: "ci-ap-password"
           SECRETS
