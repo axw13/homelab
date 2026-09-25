@@ -1,0 +1,61 @@
+---
+# Idempotent "get or create" for a KV v2 secret:
+#   1. read the secret at a known path
+#   2. keep every key that already exists (never rotate a live credential)
+#   3. generate only the keys that are missing, write back, publish as a fact
+#
+# Every Vault call runs on the controller. The target host sits on a VLAN that
+# is firewalled away from the security segment and cannot reach Vault at all;
+# forgetting delegate_to here once caused a failure that an earlier
+# lenient check silently absorbed.
+
+- name: Read existing secret from Vault
+  community.hashi_vault.vault_kv2_get:
+    engine_mount_point: "{{ vault_secret_mount }}"
+    path: "{{ vault_secret_path }}"
+  delegate_to: localhost
+  run_once: true
+  become: false
+  register: _vault_existing
+  # A missing path is the "first deploy" case and is expected. Anything else
+  # (permission denied, Vault sealed, unreachable) must still fail loudly.
+  failed_when:
+    - _vault_existing.failed
+    - "'Invalid or missing path' not in (_vault_existing.msg | default(''))"
+
+- name: Work out which keys are missing
+  ansible.builtin.set_fact:
+    _vault_current: "{{ _vault_existing.secret | default({}) }}"
+    _vault_missing: "{{ vault_secret_keys | difference((_vault_existing.secret | default({})).keys() | list) }}"
+  run_once: true
+
+- name: Generate a fresh random value for each missing key
+  ansible.builtin.set_fact:
+    _vault_generated: >-
+      {{ _vault_generated | default({}) | combine({item: lookup('ansible.builtin.password', '/dev/null',
+         length=vault_secret_length, chars=vault_secret_chars.split(','))}) }}
+  loop: "{{ _vault_missing }}"
+  run_once: true
+  no_log: true
+
+- name: Write merged secret back to Vault (existing keys unchanged)
+  community.hashi_vault.vault_kv2_write:
+    engine_mount_point: "{{ vault_secret_mount }}"
+    path: "{{ vault_secret_path }}"
+    data: "{{ _vault_current | combine(_vault_generated | default({})) }}"
+  delegate_to: localhost
+  run_once: true
+  become: false
+  when: _vault_missing | length > 0
+  no_log: true
+
+- name: Publish secret as a fact for the calling role
+  ansible.builtin.set_fact:
+    "{{ vault_secret_var }}": "{{ _vault_current | combine(_vault_generated | default({})) }}"
+  run_once: true
+  no_log: true
+
+- name: Reset scratch facts so the next include starts clean
+  ansible.builtin.set_fact:
+    _vault_generated: {}
+  run_once: true

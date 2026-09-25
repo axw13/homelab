@@ -1,0 +1,5 @@
+proxmox_endpoint = "https://pve.example.internal:8006/"
+proxmox_node     = "pve"
+template_file_id = "local:vztmpl/debian-12-standard_12.7-1_amd64.tar.zst"
+ssh_public_key   = "ssh-ed25519 AAAA... ansible@bastion"
+# proxmox_api_token: export TF_VAR_proxmox_api_token="$(vault kv get -field=token secret/proxmox/terraform)"

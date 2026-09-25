@@ -1,0 +1,23 @@
+{
+  "caddy": {
+    "vmid": 120, "vlan": "infra", "host": 10,
+    "description": "Reverse proxy (Caddy) with internal ACME",
+    "cores": 1, "memory_mb": 512, "disk_gb": 4, "storage": "local-ssd"
+  },
+  "vault": {
+    "vmid": 150, "vlan": "security", "host": 10,
+    "description": "HashiCorp Vault (Raft storage)",
+    "cores": 2, "memory_mb": 1024, "disk_gb": 8, "storage": "local-ssd"
+  },
+  "grafana": {
+    "vmid": 130, "vlan": "apps", "host": 20,
+    "description": "Grafana dashboards",
+    "cores": 1, "memory_mb": 1024, "disk_gb": 8, "storage": "local-ssd"
+  },
+  "media-automation": {
+    "vmid": 140, "vlan": "media", "host": 30,
+    "description": "Media automation stack (Docker)",
+    "cores": 2, "memory_mb": 4096, "disk_gb": 32, "storage": "nas-nfs",
+    "nesting": true, "tags": ["docker"]
+  }
+}

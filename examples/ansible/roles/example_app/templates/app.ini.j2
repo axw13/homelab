@@ -1,0 +1,13 @@
+# Managed by Ansible — local edits will be overwritten.
+[server]
+http_port = {{ example_app_port }}
+root_url = https://{{ example_app_fqdn }}/
+
+[security]
+admin_password = {{ example_app_secrets.admin_password }}
+secret_key = {{ example_app_secrets.secret_key }}
+
+[auth.generic_oauth]
+enabled = true
+client_id = {{ example_app_name }}
+client_secret = {{ example_app_secrets.oidc_client_secret }}
