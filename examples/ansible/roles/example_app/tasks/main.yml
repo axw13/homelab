@@ -1,0 +1,33 @@
+---
+# Shape shared by every service role: secrets from Vault first, then config,
+# then the reverse-proxy site and DNS record on the infra hosts.
+
+- name: Ensure app credentials exist in Vault
+  ansible.builtin.include_role:
+    name: vault_secret
+  vars:
+    vault_secret_path: "apps/{{ example_app_name }}"
+    vault_secret_keys: [admin_password, secret_key, oidc_client_secret]
+    vault_secret_var: example_app_secrets
+
+- name: Render app config
+  ansible.builtin.template:
+    src: app.ini.j2
+    dest: "/etc/{{ example_app_name }}/{{ example_app_name }}.ini"
+    owner: root
+    group: "{{ example_app_name }}"
+    mode: "0640"
+  no_log: true
+  notify: Restart app
+
+- name: Add reverse-proxy site block
+  ansible.builtin.blockinfile:
+    path: /etc/caddy/Caddyfile
+    marker: "# {mark} ANSIBLE {{ example_app_name }}"
+    block: |
+      {{ example_app_fqdn }} {
+        reverse_proxy {{ ansible_host }}:{{ example_app_port }}
+      }
+  delegate_to: "{{ groups['reverse_proxy'][0] }}"
+  run_once: true
+  notify: Reload caddy

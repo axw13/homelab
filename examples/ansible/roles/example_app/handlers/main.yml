@@ -1,0 +1,12 @@
+---
+- name: Restart app
+  ansible.builtin.service:
+    name: "{{ example_app_name }}-server"
+    state: restarted
+
+- name: Reload caddy
+  ansible.builtin.service:
+    name: caddy
+    state: reloaded
+  delegate_to: "{{ groups['reverse_proxy'][0] }}"
+  run_once: true

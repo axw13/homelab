@@ -1,0 +1,10 @@
+extends: default
+
+rules:
+  line-length: disable
+  truthy:
+    allowed-values: ["true", "false", "yes", "no", "on"]
+  comments:
+    min-spaces-from-content: 1
+  document-start: disable
+  # ESPHome uses !secret / !lambda tags; yamllint only checks structure

@@ -1,0 +1,8 @@
+---
+# Inputs (set per include):
+#   vault_secret_path: KV v2 path relative to the mount, e.g. "apps/grafana"
+#   vault_secret_keys: list of keys that must exist in that secret
+#   vault_secret_var:  name of the fact the resulting dict is published as
+vault_secret_mount: secret
+vault_secret_length: 40
+vault_secret_chars: "ascii_letters,digits"

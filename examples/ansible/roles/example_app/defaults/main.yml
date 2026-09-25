@@ -1,0 +1,4 @@
+---
+example_app_name: grafana
+example_app_port: 3000
+example_app_fqdn: "{{ example_app_name }}.example.internal"
