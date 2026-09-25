@@ -4,6 +4,8 @@
 
 The Terraform/Ansible source for this lab is kept in a private repository (it contains real network topology and is not for public sharing) — this README documents the architecture, design decisions, and the engineering practices behind it.
 
+Sanitized versions of the core patterns are in [`examples/`](examples/): the JSON-driven Terraform LXC module and the idempotent Vault "get-or-create" Ansible role. They and the ESPHome device config are checked by [CI](.github/workflows/ci.yml) on every push.
+
 ---
 
 ## 🧰 Skills & Technologies
@@ -52,24 +54,36 @@ Every service here is deployed the same, repeatable way — nothing is hand-clic
 
 ## 🗺️ Architecture Overview
 
-```
-Internet
-   │
-   ▼
-[ Firewall / Router — VLAN-aware, stateful rules per segment ]
-   │
-   ├── Management VLAN     — bastion host, IaC tooling, admin access only
-   ├── Infrastructure VLAN — reverse proxy, DNS, internal CA, CI/CD, databases
-   ├── Application VLAN    — automation, dashboards, home inventory, smart home
-   ├── Media VLAN          — media server + media automation stack
-   ├── Security VLAN       — secrets manager, SSO, SIEM (most tightly firewalled segment)
-   ├── Clients VLAN        — personal devices, workstations
-   ├── IoT VLAN            — smart home devices, isolated from every other segment except a narrow DNS exception
-   ├── VPN VLAN            — WireGuard gateway + Tailscale subnet router for remote access
-   └── DMZ VLAN            — the one thing exposed toward the internet (tunnel endpoint)
+```mermaid
+flowchart TB
+    NET([Internet]) --> FW["Firewall / router<br/>VLAN-aware, stateful rules per segment"]
 
-Cross-VLAN traffic is default-deny; every exception is an explicit, documented pass rule.
+    subgraph TRUST["Segments: default-deny between every pair, enforced by the firewall"]
+        direction LR
+        MGMT["Management<br/>bastion · IaC tooling"]
+        INFRA["Infrastructure<br/>reverse proxy · DNS · CA · CI/CD · DBs"]
+        APPS["Application<br/>automation · dashboards · smart home"]
+        MEDIA["Media<br/>media server + automation"]
+        SEC["Security<br/>Vault · Authentik · Wazuh"]
+        CLIENTS["Clients<br/>personal devices"]
+        IOT["IoT<br/>smart-home devices"]
+        VPN["VPN<br/>WireGuard · Tailscale subnet router"]
+        DMZ["DMZ<br/>tunnel endpoint"]
+    end
+
+    FW -- "inbound: tunnel only" --> DMZ
+    FW -- "inbound: VPN only" --> VPN
+    IOT -- "DNS only" --> INFRA
+    VPN -- "subnet routes" --> MGMT
+    VPN -- "subnet routes" --> INFRA
+
+    classDef locked fill:#fde2e2,stroke:#c0392b,color:#000
+    classDef exposed fill:#fff4d6,stroke:#d68910,color:#000
+    class SEC,IOT locked
+    class DMZ exposed
 ```
+
+Cross-VLAN traffic is default-deny; every exception is an explicit, documented pass rule. The arrows show the only inbound paths and the exceptions described in this README; the diagram doesn't list every rule. Red segments are the most tightly locked down; amber is internet-facing.
 
 **Hypervisor:** Proxmox VE, single physical host, LXC-first (containers for every Linux service; a couple of true VMs only where required — router/firewall, smart-home OS, NAS).
 
@@ -81,7 +95,7 @@ Cross-VLAN traffic is default-deny; every exception is an explicit, documented p
 
 - **Terraform** (`bpg/proxmox` provider) drives every LXC's existence — a single JSON file defines each container's VLAN, IP, resources, and storage backend; a `for_each` loop turns that into real infrastructure. Adding a new service is: add one JSON entry, write one Ansible role, `terraform apply`.
 - **Terraform state** is stored in Postgres (not local files), so infrastructure changes are safe even with the tooling itself running from a container that could be rebuilt.
-- **Ansible** owns everything past "the container exists" — package installs, service config, reverse-proxy site blocks, DNS records, and the secrets-generation dance described below. Roles follow a strict idempotent pattern: check if a secret exists first, generate only if missing, never regenerate and break an existing integration.
+- **Ansible** owns everything past "the container exists" — package installs, service config, reverse-proxy site blocks, DNS records, and the secrets-generation dance described below. Roles follow a strict idempotent pattern: check if a secret exists first, generate only if missing, never regenerate and break an existing integration. See the [sanitized example](examples/README.md).
 
 ---
 
@@ -185,29 +199,41 @@ Home Assistant integrates a mix of local-only (ESPHome, Zigbee2MQTT, WLED) and c
 
 ## 💡 Engineering Highlights / War Stories
 
-A few real incidents this lab has actually hit and resolved — the parts that don't show up in a features list but are the actual substance of running real infrastructure:
+Real incidents this lab has hit and resolved. Each is written up in full in [`docs/war-stories/`](docs/war-stories/README.md) as **Symptom → Investigation → Root cause → Fix → Lesson**.
 
-- **Diagnosed and recovered from a multi-day, multi-drive NAS pool failure cascade** — several genuinely bad drives, one case of a failing drive's bus noise disrupting its healthy neighbor on a shared expander channel (which looked exactly like a second failure until isolated by pulling the actual bad drive and confirming the neighbor's symptoms cleared), and a final severe pool suspend that corrupted several VM/container disk images simultaneously and spiked hypervisor load into the triple digits (every process wedged in uninterruptible I/O wait on the suspended storage mount). Rebuilt the pool from scratch with a deliberate size-for-reliability tradeoff rather than reconstructing the original higher-capacity layout, and migrated the highest-I/O workloads off shared NAS storage entirely onto local SSD instead — removing the failure mode rather than just patching around it.
-- **Recovered from a real management-network outage** caused by a switch VLAN reassignment mid-migration, diagnosed methodically (bond state → physical link state → full ARP-table cross-reference across every VLAN) rather than assuming and reflashing/rebooting things.
-- **Root-caused a cascading "everything is offline" incident** after a power outage down to a single root cause (most local-network integrations store a static IP and never notice a DHCP lease changed) that had silently broken a dozen unrelated integrations at once, then fixed the actual cause once instead of patching each symptom individually.
-- **Wrote and dry-run tested a full disaster recovery procedure**, catching real gotchas (a stale process lock, orphaned backup data left by an interrupted run) that only show up when you actually try the restore instead of trusting the backup exists.
-- **Chased a "fleet-wide NTP config" change that silently did nothing** — every container reported the change applied successfully, but nothing was actually happening under the hood. Root cause: unprivileged Linux containers share their host's kernel clock and cannot run their own time-sync client at all (the service refuses to even start in a container, and the container has no permission to adjust a clock regardless). The actual fix was pointing the *hypervisor's* own clock at the new internal time server — every container inherits it for free. A good reminder that "the task reported success" and "the task did something real" are two different claims, especially for anything kernel-level.
-- **Designed the automated patching workflow to respect IaC as the actual source of truth**, not just the running fleet. Most services here don't pin a specific version in their Ansible config, so patching them live and re-running the role later produces the same result either way — no drift. But a few do pin an exact version tag; patching *those* live without also updating the pinned value in code (and committing it) would create silent infrastructure drift — a future rebuild would quietly redeploy the old version, undoing the patch. The automation checks which case applies before deciding how to apply an update, rather than treating "patch everything the same way" as good enough.
-- **Rolled out forward-auth to over a dozen services and hit a silently-wrong API filter along the way** — one endpoint accepted a filter parameter that looked identical to one on a sibling endpoint, but silently ignored it and returned the whole unfiltered list instead of erroring. The first service provisioned fine; every service after it then "found" that first one's config and quietly reused it instead of creating its own — surfacing only as a confusing, unrelated-looking conflict error several steps later. Fixed by switching to the parameter that actually filters, and by treating the earlier vague error as a symptom to trace back, not something to just retry past.
-- **Found and fixed a masked automation bug**: a role that writes a generated credential into the secrets manager was missing a "run this from the controller, not the target host" directive that every equivalent role elsewhere had — invisible on first glance because an earlier, unrelated check step in the same role had a permissive error-tolerance flag that silently absorbed the same underlying connectivity failure and reported success. The real failure only surfaced later, on a step without that tolerance. A reminder that a deliberately lenient error handler on one step can mask a real problem that only shows up downstream.
-- **Diagnosed a third-party Docker image with a broken dependency tree** (two conflicting versions of the same internal library installed simultaneously) that caused a clean-looking startup — successful login, successful registration with its upstream API — followed by a crash loop on an internal null-reference error. Verified the root cause with a targeted debug patch rather than guessing, confirmed it wasn't a permissions issue via a raw API call bypassing the client library entirely, then built a corrected image from source with the dependency tree pinned to a single consistent version.
-- **Migrated the entire smart-home device fleet onto its own dedicated IoT VLAN**, off the general clients segment — a dozen-plus devices across five different local/cloud protocols (WLED, ESPHome, local Tuya, cloud Tuya, a manufacturer camera app), each with a different migration path. The trickiest recurring gotcha: several local-protocol devices issued a **new authentication key** from the vendor's cloud the moment they rejoined the new network — the same physical device, same account, same everything, but the previously-stored local credential silently stopped authenticating anyway. Traced one particularly stubborn case (a locked-down cloud account with no in-app way to view the device's key) through a chain of dead ends — a developer cloud API blocked by an unexplained subscription-entitlement error on two separately created projects, a MITM-based extraction approach blocked by the same network segmentation this migration was implementing — before finding that the vendor's own web console had a session-authenticated API explorer that bypassed the entitlement gate entirely, since it doesn't rely on the same developer-credential path.
-- **Chased an intermittent "invalid auth" on a freshly-migrated camera integration** that turned out to have nothing to do with credentials at all — a device-level "third-party API compatibility" toggle had been silently reset to off during the same network rejoin, a separate setting from the account/device password entirely. A reminder that "authentication failed" doesn't always mean the credentials are wrong.
-- **Stood up a WireGuard remote-access peer and hit a networking gap that had never been exercised**: the gateway's outbound NAT rule for tunnel-peer traffic didn't exist at all — traffic left the tunnel fine, but the router had no route back to an individual peer's tunnel address (only the gateway host's own address was a known route on that segment), so every reply silently vanished, DNS included. Root-caused with a live packet capture on the gateway's own interface during a real connection attempt, which conclusively separated "traffic never arrives" (a port-forward/NAT problem upstream) from "traffic arrives but routes nowhere" (this bug) — two failure modes that look identical from the client side but need completely different fixes.
-- **Rolled out a second monitoring platform fleet-wide and immediately hit a container-networking gotcha that produced a wall of near-identical false alarms**: nearly two dozen hosts fired the same "load average too high" alert within seconds of each other, at almost identical values regardless of what each host actually did — the tell that something structural, not per-host, was wrong. Root cause: unprivileged Linux containers share their host's kernel, and the standard load-average figure isn't containerized — every container was reading the *physical hypervisor's* system-wide load, not its own, while correctly reporting its own separately-namespaced CPU count. Confirmed by comparing the monitoring platform's per-host numbers directly against the hypervisor's own `uptime` output. Fixed at the source (disabled the duplicated per-container copies, kept the one accurate instance on the hypervisor's own monitoring entry) rather than just raising thresholds to quiet two dozen alerts that were never independently meaningful in the first place.
-- **Added a second, independent VPN path (a subnet router) for reaching the management/infrastructure segments**, both remotely and from a local workstation that's normally firewalled away from them — deliberately alongside the existing gateway rather than replacing it. Assumed it would need the identical manual NAT fix as the WireGuard case above and checked before adding it: this tool manages its own return-routing automatically the moment subnet routing is enabled, no manual rule required — a good reminder that two conceptually similar VPN tools can differ completely in what they handle for you versus what you have to do by hand, and that's worth verifying rather than assuming from precedent. Confirmed the whole thing actually worked with a real differential test rather than a superficial one: an unrelated segment already had a broad "allow everything else" rule that made a naive reachability test pass regardless of whether the VPN was even connected, so the real proof came from testing against a *different* segment with an explicit, narrow block rule instead — same request, failed with the VPN off, succeeded immediately with it on.
-- **Debugged three unrelated-looking failures in an internal AI-inference gateway down to their real, distinct root causes**, after a burst of automated testing left several dependent workflows failing with vague timeout/unavailable errors. First: the gateway's shared rate limit counts a request against quota the instant it's *accepted*, not when it completes — a handful of oversized, slow calls silently ate the hourly budget for everything else that depended on it, well before any of them actually failed. Second: a caller-side timeout shorter than the gateway's own meant a caller could give up and move on while the gateway kept processing (and billing) the abandoned request anyway — found by comparing the two configured values directly rather than assuming they matched. Third, unrelated to the first two: a workflow scheduler's short-interval trigger kept firing on a stale interval across multiple reconfigurations, traced to an in-memory timer that normal start/stop cycling didn't actually clear — only a full process restart did, confirmed by cross-referencing execution timestamps against the process's own restart time. Three genuinely different bugs that all initially looked like the same symptom.
-- **Traced a media-server freezing complaint to five unrelated services quietly hammering the same weak disks**, not to the media server at all. The first, plausible-looking fix (hardware transcoding was misconfigured despite a working GPU) turned out to be a real bug worth fixing but not the actual cause — the specific playback session freezing wasn't even using video encoding at the time, so there was nothing for that fix to accelerate. The real culprit only showed up in host-level metrics: dozens of processes permanently stuck waiting on disk I/O, a load average several times the core count, and two budget, DRAM-less consumer SSDs backing every container's storage struggling to keep up. Ranking every container by cumulative disk reads surfaced the actual pattern — five independent services (a workflow-automation tool, a uptime monitor, the secondary monitoring stack, the SSO provider, and a home-inventory app) had each, separately, been quietly accumulating unbounded history/log/execution data with no pruning ever configured, none of them individually alarming (a few hundred megabytes each) but collectively generating constant, heavy read traffic against already-weak disks. Fixed each at its actual source — enabling built-in retention/pruning settings where they existed, a corrected auto-discovery template default where the underlying platform didn't expose one, a scheduled cleanup job where no config option existed at all, and just deleting stray leftover files where the "data" wasn't even real. A reminder that the service reporting the symptom and the service causing it are often not the same service, and that resource contention from many small, individually-reasonable-looking sources can be harder to spot than one obviously misbehaving process.
+**Start with these:**
+- **[Multi-drive NAS pool failure cascade](docs/war-stories/nas-pool-failure-cascade.md)**: a failing drive's bus noise made a healthy neighbour look like a second failure. Rebuilt the pool for reliability over capacity and moved the hottest workloads off shared storage.
+- **[Media-server freezes caused by five other services](docs/war-stories/cross-service-disk-contention.md)**: five services' unpruned history quietly saturated weak SSDs. Found by ranking containers by disk reads; fixed each at its source.
+- **[Three distinct bugs behind one "timeout" symptom](docs/war-stories/ai-gateway-three-bugs.md)**: quota counted on acceptance, mismatched timeouts, and an in-memory timer that survived reconfiguration.
+- **[A wall of identical "load too high" alerts](docs/war-stories/container-load-average-false-alarms.md)**: LXC containers report the hypervisor's load average, not their own. Fixed the checks instead of raising thresholds.
+
+**More:**
+- [Management-network outage during a VLAN migration](docs/war-stories/management-network-outage.md): bond → link → ARP cross-reference instead of reboots
+- [A WireGuard peer whose replies vanished](docs/war-stories/wireguard-nat-gap.md): a packet capture separated "never arrives" from "no route back"
+- [Proving a second VPN path actually works](docs/war-stories/subnet-router-differential-test.md): a test that could fail, against a segment that should be blocked
+- [Migrating the smart-home fleet onto its own IoT VLAN](docs/war-stories/iot-vlan-migration.md): devices got new local keys on rejoin
+- [Designing patch automation that respects IaC](docs/war-stories/iac-drift-aware-patching.md): pinned versions must be patched in code, not just live
+- [An automation bug hidden by a lenient error handler](docs/war-stories/masked-automation-bug.md)
+- [A silently ignored API filter during a forward-auth rollout](docs/war-stories/forward-auth-api-filter.md)
+- [A fleet-wide NTP change that silently did nothing](docs/war-stories/ntp-silent-no-op.md): containers share the host clock
+- [A third-party Docker image with a broken dependency tree](docs/war-stories/broken-docker-dependency-tree.md)
+- ["Everything is offline" after a power outage](docs/war-stories/power-outage-static-ip-cascade.md): integrations that cached DHCP addresses
+- [An "invalid auth" error that wasn't about credentials](docs/war-stories/camera-third-party-toggle.md)
+- [Dry-running the disaster-recovery procedure](docs/war-stories/dr-dry-run.md)
 
 ---
 
 ## 🗺️ Roadmap
 
+**Recently completed**
+- [x] Full smart-home fleet migrated onto a dedicated IoT VLAN
+- [x] Second, independent VPN path (subnet router) for management/infrastructure access
+- [x] Second monitoring platform (Zabbix) covering firewall, NAS and hypervisor via SNMP
+- [x] Forward-auth SSO rolled out to services without native OIDC
+- [x] Self-hosted issue tracking for AI-agent findings
+- [x] Hardware health (SMART, pool state) alerting
+
+**Next**
 - [ ] Second offsite backup destination for extra redundancy
 - [ ] Expand SSO coverage to the last few services still using local auth
 - [ ] Formal quarterly disaster-recovery re-test
