@@ -20,6 +20,7 @@ Real incidents this lab has hit and resolved. Each one follows the same layout: 
 - [Designing patch automation that respects IaC](iac-drift-aware-patching.md)
 - [An automation bug hidden by a lenient error handler](masked-automation-bug.md)
 - [A silently ignored API filter during a forward-auth rollout](forward-auth-api-filter.md)
+- [A "stuck" job that had quietly finished](silent-empty-branch.md)
 
 ## Systems, containers & home automation
 - [A fleet-wide NTP change that silently did nothing](ntp-silent-no-op.md)

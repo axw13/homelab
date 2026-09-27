@@ -118,6 +118,7 @@ Vault itself is backed up via its integrated Raft snapshot mechanism — restori
 **Authentik** provides SSO across nearly the entire service catalog, via two mechanisms depending on what each app actually supports:
 
 - **Native OIDC** for the handful of apps that implement it themselves (git hosting, dashboards, monitoring, wiki, secrets manager UI, IPAM). Getting this working consistently surfaced real integration quirks — mismatched scope requests, apps that silently drop non-explicit `grant_types`, GraphQL mutations that delete-and-recreate config instead of patching it — all captured as reusable Ansible task patterns rather than one-off hacks.
+- **Edge login for the one public web app.** A household deals & meal-planning site is published through the tunnel behind a zero-trust access proxy at the CDN edge (Google login or e-mail code; only listed accounts get in). The automation platform behind it doesn't trust any identity header: every request's signed access token is verified (signature against the published keys, audience, issuer, expiry) inside the workflow itself, so the same endpoints return 403 when reached by any other path. Per-person permissions live in a small table edited from the site's own admin page, with an audit log.
 - **Forward-auth at the reverse proxy** for everything else (media stack, automation tools, dashboards, monitoring UIs with no OIDC of their own) — the reverse proxy checks with Authentik's outpost before forwarding any request, so an app never needs to support SSO itself to get gated by it. A couple of services are deliberately left out of this (anything needing simple local-network trusted access, or already authenticating through another already-SSO'd service) rather than applying it blindly everywhere.
 
 ---
@@ -215,6 +216,7 @@ Real incidents this lab has hit and resolved. Each is written up in full in [`do
 - [Designing patch automation that respects IaC](docs/war-stories/iac-drift-aware-patching.md): pinned versions must be patched in code, not just live
 - [An automation bug hidden by a lenient error handler](docs/war-stories/masked-automation-bug.md)
 - [A silently ignored API filter during a forward-auth rollout](docs/war-stories/forward-auth-api-filter.md)
+- [A "stuck" job that had quietly finished](docs/war-stories/silent-empty-branch.md): zero rows ended the workflow branch without a trace
 - [A fleet-wide NTP change that silently did nothing](docs/war-stories/ntp-silent-no-op.md): containers share the host clock
 - [A third-party Docker image with a broken dependency tree](docs/war-stories/broken-docker-dependency-tree.md)
 - ["Everything is offline" after a power outage](docs/war-stories/power-outage-static-ip-cascade.md): integrations that cached DHCP addresses
