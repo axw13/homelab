@@ -21,6 +21,11 @@ Real incidents this lab has hit and resolved. Each one follows the same layout: 
 - [An automation bug hidden by a lenient error handler](masked-automation-bug.md)
 - [A silently ignored API filter during a forward-auth rollout](forward-auth-api-filter.md)
 - [A "stuck" job that had quietly finished](silent-empty-branch.md)
+- [Pricing 4,400 recipes once instead of on every page view](precompute-instead-of-per-request.md)
+- [A −81 % "discount" that didn't exist](scraper-tile-bleed.md)
+
+## Monitoring
+- [The watchman that counted ghosts - and missed a real outage](monitoring-ghost-problems.md)
 
 ## Systems, containers & home automation
 - [A fleet-wide NTP change that silently did nothing](ntp-silent-no-op.md)

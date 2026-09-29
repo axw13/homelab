@@ -188,7 +188,7 @@ The backup strategy deliberately does **not** back up everything — infrastruct
 | **Documentation** | Self-hosted wiki |
 | **Media** | Media server (hardware-accelerated transcoding), automated media management/acquisition stack, subtitle automation with multi-provider + multi-language support |
 | **Home Automation** | Home Assistant, WLED, ESPHome, Zigbee2MQTT, various local + cloud device integrations |
-| **Productivity** | Workflow automation, home inventory tracker, unified service dashboard, recipe manager, Discord bot integrations, self-hosted RSS/video aggregator with AI-scored relevance filtering and an AI-generated daily digest, AI-assisted job-market matching tool that scores postings against a candidate profile and surfaces recurring skill-gap trends |
+| **Productivity** | Workflow automation, home inventory tracker, unified service dashboard, recipe manager, Discord bot integrations, self-hosted RSS/video aggregator with AI-scored relevance filtering and an AI-generated daily digest, AI-assisted job-market matching tool that scores postings against a candidate profile and surfaces recurring skill-gap trends, a household deals site that tracks supermarket and pharmacy prices daily (price history, cross-shop comparison by barcode), prices ~4,400 recipes against live offers and builds meal plans from them |
 
 ---
 
@@ -222,6 +222,9 @@ Real incidents this lab has hit and resolved. Each is written up in full in [`do
 - ["Everything is offline" after a power outage](docs/war-stories/power-outage-static-ip-cascade.md): integrations that cached DHCP addresses
 - [An "invalid auth" error that wasn't about credentials](docs/war-stories/camera-third-party-toggle.md)
 - [Dry-running the disaster-recovery procedure](docs/war-stories/dr-dry-run.md)
+- [The watchman that counted ghosts - and missed a real outage](docs/war-stories/monitoring-ghost-problems.md): a maintenance pause with no undo, and disabled checks that stay "open" forever
+- [A −81 % "discount" that didn't exist](docs/war-stories/scraper-tile-bleed.md): the last listing tile ran into the rest of the page
+- [Pricing 4,400 recipes once instead of on every page view](docs/war-stories/precompute-instead-of-per-request.md): precompute + paging, then cutting the SSD writes it caused
 
 ---
 
@@ -234,6 +237,7 @@ Real incidents this lab has hit and resolved. Each is written up in full in [`do
 - [x] Forward-auth SSO rolled out to services without native OIDC
 - [x] Self-hosted issue tracking for AI-agent findings
 - [x] Hardware health (SMART, pool state) alerting
+- [x] Pharmacy price tracking (nightly scrapers, barcode matching across shops, long-term price history) and meal plans built from priced recipes with a single small AI check
 
 **Next**
 - [ ] Second offsite backup destination for extra redundancy
