@@ -45,3 +45,21 @@ provider remained selected.
 The implementation was checked against the installed CLI and the official
 [non-interactive documentation](https://learn.chatgpt.com/docs/non-interactive-mode)
 and [configuration reference](https://learn.chatgpt.com/docs/config-file/config-reference).
+
+
+## Recovery of stopped guests
+
+The shared policy now permits starting an unexpectedly stopped Proxmox LXC or
+VM at any hour when it serves an alerting service expected to be running.
+The agent confirms the guest identity and stopped state directly on Proxmox,
+checks maintenance intent, locks and storage, then issues one start for that
+outage. It verifies the real application and fresh monitoring data afterward.
+A disabled on-boot flag or an unknown shutdown cause does not block recovery.
+Running guests, intentional shutdowns and conflicting operations are preserved;
+failed starts or repeated shutdowns escalate rather than loop. Other maintenance
+and update actions retain their existing windows and restrictions.
+
+Validation included a live stopped-container recovery with application and
+monitoring verification, and a text-only Codex policy evaluation covering both
+LXC and VM starts, running guests, intentional shutdowns, locks and repeated
+failures. The VM start path was evaluated without stopping a healthy guest.
