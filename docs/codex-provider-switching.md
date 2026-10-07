@@ -4,6 +4,13 @@ The homelab automation now supports both Codex and Claude without duplicating
 scheduled jobs. Existing maintenance policies, scoped Vault authentication,
 locks, workflow identifiers, and schedules remain in place.
 
+Notifications resolve their provider, model, and reasoning level through the
+same selector used for execution. Legacy Claude role names do not determine
+the reported runtime identity. The current Codex roles use one model with low
+reasoning for triage and routine work, and medium reasoning for escalation
+and review; per-tier model overrides support distinct model choices. New
+result records retain the reasoning level alongside the actual model.
+
 The maintenance wrappers use a provider adapter. It passes the existing CLI
 arguments through to Claude, or runs Codex and converts its event stream into
 the same result and token-usage contract. A provider switch affects future
