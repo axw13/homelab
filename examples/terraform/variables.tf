@@ -34,5 +34,5 @@ variable "ssh_public_key" {
 variable "dns_servers" {
   description = "Resolvers handed to every container."
   type        = list(string)
-  default     = ["10.20.0.53"]
+  default     = ["172.20.20.53"]
 }
