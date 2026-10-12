@@ -44,3 +44,6 @@ are retained as source diagnostics rather than claimed successful collection.
 References: [SmartRecruiters Posting API](https://developers.smartrecruiters.com/docs/endpoints),
 [Jooble API](https://jooblehelpcenter.freshdesk.com/en/support/solutions/articles/60001448238-rest-api-documentation),
 and [Freelancermap](https://www.freelancermap.com/projects).
+
+A subsequent operator-confirmed profile correction now emphasizes fixed voice
+and data operations consistently in job scoring and weekly career guidance.
