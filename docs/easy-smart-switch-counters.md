@@ -28,3 +28,10 @@ changed as part of the review.
 
 References: [Easy Smart configuration guide](https://www.tp-link.com/au/document/111934/)
 and [reported tagged-frame counter behavior](https://community.tp-link.com/en/business/forum/topic/150395).
+
+A later firewall status capture showed clean reported WAN and physical LAN counters but
+nonzero cumulative VLAN output-error totals. These must be distinguished from
+per-second monitoring rates and from firewall-blocked traffic. Virtual bridge
+errors concern a separate software path and cannot directly identify a physical
+switch receive fault. No offloading or MTU changes were made without evidence.
+See [Netgate's counter definitions](https://docs.netgate.com/pfsense/en/latest/monitoring/status/interfaces.html).
