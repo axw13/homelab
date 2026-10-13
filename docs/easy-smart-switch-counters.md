@@ -35,3 +35,8 @@ per-second monitoring rates and from firewall-blocked traffic. Virtual bridge
 errors concern a separate software path and cannot directly identify a physical
 switch receive fault. No offloading or MTU changes were made without evidence.
 See [Netgate's counter definitions](https://docs.netgate.com/pfsense/en/latest/monitoring/status/interfaces.html).
+
+Follow-up: the operator removed the IoT access port from the native LAN VLAN.
+It now has exclusively untagged IoT membership, resolving the identified VLAN
+isolation concern. The firewall trunk membership is retained. This configuration
+correction does not establish the cause of the separate received-packet counter.
