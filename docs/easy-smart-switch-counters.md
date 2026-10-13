@@ -40,3 +40,13 @@ Follow-up: the operator removed the IoT access port from the native LAN VLAN.
 It now has exclusively untagged IoT membership, resolving the identified VLAN
 isolation concern. The firewall trunk membership is retained. This configuration
 correction does not establish the cause of the separate received-packet counter.
+
+Read-only hypervisor checks then found zero loss in a gateway ping and no increase
+in physical NIC error/drop counters. A bridge-drop counter rose at roughly one
+per second. Header-only capture identified small Realtek control frames from the
+switch; the drop increase stopped while a packet-capture listener was present and
+resumed after it exited. This supports unhandled control-frame accounting rather
+than demonstrated loss of the tested IP traffic, and shows an observer effect in
+software counters. The separate switch receive-bad counter remains unexplained.
+[Linux statistics documentation](https://docs.kernel.org/networking/statistics.html)
+includes unsupported protocols among received packets counted as dropped.
