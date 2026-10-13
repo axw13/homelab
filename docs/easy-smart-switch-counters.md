@@ -3,8 +3,10 @@
 A fresh operator-supplied switch configuration can overturn an old topology
 diagram. In this case, previously documented WAN-group ports were down, while
 the port with received-bad-packet counts carried a native LAN and tagged client
-and IoT networks. VLAN membership alone does not identify the attached device;
-confirm physical cabling before attributing switch errors to a firewall WAN NIC.
+and IoT networks. VLAN membership alone does not identify the attached device. The operator then
+confirmed the error-bearing port connects to the firewall; read-only configuration
+matched its VLANs to the LAN interface. These counters therefore concern the LAN
+trunk, rather than the ISP-facing WAN interface.
 
 TP-Link community reports describe short tagged frames being counted as both
 good and bad on some Easy Smart switches. Tagged traffic makes that explanation
