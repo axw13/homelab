@@ -44,3 +44,31 @@ update reports and does not imply an update or reboot was performed.
 Policies, workflow messages and regression tests were updated to reflect this
 distinction. Tests cover exact-name boundaries, preserved security/unknown handling,
 and skipped, unknown or in-progress updates.
+
+## Reducing security false positives at the source
+
+A later security burst came from mutable application databases and broad binary
+string signatures. Incident routing now recognizes only the specific reviewed
+runtime-file patterns, requiring expected owner/group/permissions and an explicit
+change-attribute list. Configuration and authentication-key changes, unexpected
+paths, privilege changes and higher-severity findings still alert. Raw FIM events
+remain searchable; no broad directory exclusions were introduced.
+
+The four affected binary hashes were revalidated against signed Debian release,
+index and package artifacts. All 30 affected hosts passed fresh version, SHA256,
+size, ownership, mode and alias checks. Future exact generic-signature events
+require fresh per-host attestation before going to summary counters. Changed or
+unreachable hosts and unknown versions still require investigation. Probes are
+read-only, use fixed commands and validated SSH host keys, and never execute the
+flagged binaries.
+
+An offline replay of the complete 238-event incident sample reduced four incident
+groups to one (75%), retaining sensitive hypervisor configuration/key changes.
+This measures that sample, not all future traffic. Twenty-eight collector/filter
+tests and four closure-policy tests passed. Scheduled collection stayed healthy.
+
+Critical vulnerability identity now survives enrollment-ID changes and brief
+index rebuild gaps. New package versions/CVEs and reintroduction after a full day
+of absence remain actionable. Cleared dispatch-cap summaries close only with a
+fresh dispatcher heartbeat and empty work queue. Vendor-validated vulnerabilities,
+missing coverage and genuine hardware/performance tasks remain visible.
