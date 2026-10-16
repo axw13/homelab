@@ -24,3 +24,23 @@ isolated shell tests using mock HTTP for unchanged and changed storm summaries,
 live active-workflow readback, and comment/state readback for every closed incident.
 No maintenance wrapper or production alert was invoked merely as a test. Raw
 security evidence, both AI integrations and recovery observation windows were retained.
+
+## Operator-approved closure exceptions
+
+The operator subsequently removed the blanket three-day hold for completed
+updates and specific self-clearing restart/delivery notices. Six additional
+issues were closed after fresh verification or explicit disposition of historical
+update tracking. Four genuine security/performance work items remained open.
+
+The deterministic verifier uses an exact allowlist for one-check closure.
+Disabled, unsupported or stale monitoring cannot pass. Home automation updates
+also require a direct live installed/latest version match and no installation in
+progress; skipping a release is not completion. Recovery webhooks alone cannot
+close incidents. Unknown conditions and recurring availability/performance faults
+retain their measured recovery window. Security findings and missing coverage
+remain open until addressed. Remaining routine package availability stays in
+update reports and does not imply an update or reboot was performed.
+
+Policies, workflow messages and regression tests were updated to reflect this
+distinction. Tests cover exact-name boundaries, preserved security/unknown handling,
+and skipped, unknown or in-progress updates.
