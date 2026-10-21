@@ -29,3 +29,12 @@ the offline indicator. All dashboard configurations were checked afterward and
 contained no retired kitchen references. Supported configuration API save/readback
 verified both updates; private backups support rollback. No physical light test
 or restart was required. Browser rendering was not inspected.
+
+The complete custom integration was subsequently packaged in a separate private
+source repository with versioned release metadata, a clean single-commit history,
+synthetic tests and generic documentation. Staged/full-history secret scans and
+comparisons against sensitive live configuration values passed. No runtime HA
+configuration was included. The package follows HACS/Marketplace conventions,
+but those installers require public repositories; authenticated manual installation
+is documented while the source remains private. Packaging did not alter the live
+installation. Publication would require explicit authorization and a fresh review.
