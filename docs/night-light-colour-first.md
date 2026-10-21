@@ -22,3 +22,10 @@ acceptance of colour while off limit what software checks prove; physical startu
 appearance needs observation in normal use. Backups and source overlays support
 rollback without replacing other integration files. Future integration updates
 must preserve the action or revert its callers.
+
+Dashboard follow-up: replaced 36 retired kitchen-light references across the
+Overview and touch dashboards, including individual cards, group controls and
+the offline indicator. All dashboard configurations were checked afterward and
+contained no retired kitchen references. Supported configuration API save/readback
+verified both updates; private backups support rollback. No physical light test
+or restart was required. Browser rendering was not inspected.
